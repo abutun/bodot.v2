@@ -1,41 +1,44 @@
 #include <Arduino.h>
 #include <NewPing.h>
 
+void manuelMode();
+void autoMode();
 void findWay(unsigned int frontDistance, unsigned int leftDistance, unsigned int rightDistance);
 void brake();
 void turn(bool left);
 void forward(bool back);
-
-// Right front motor
-int MOTOR_RF_ENABLE_PIN   = 2;
-int MOTOR_RF_DIR_PIN1     = 30;
-int MOTOR_RF_DIR_PIN2     = 31;
-
-// Right back motor
-int MOTOR_RB_ENABLE_PIN   = 3;
-int MOTOR_RB_DIR_PIN1     = 32;
-int MOTOR_RB_DIR_PIN2     = 33;
-
-// Left front motor
-int MOTOR_LF_ENABLE_PIN   = 4;
-int MOTOR_LF_DIR_PIN1     = 34;
-int MOTOR_LF_DIR_PIN2     = 35;
+int getSerialData();
 
 // Left back motor
-int MOTOR_LB_ENABLE_PIN   = 5;
-int MOTOR_LB_DIR_PIN1     = 36;
-int MOTOR_LB_DIR_PIN2     = 37;
+const int MOTOR_LB_ENABLE_PIN   = 2;
+const int MOTOR_LB_DIR_PIN1     = 36;
+const int MOTOR_LB_DIR_PIN2     = 37;
 
-int LEFT_ECHO_PIN         = 38;
-int LEFT_TRIGGER_PIN      = 39;
+// Right back motor
+const int MOTOR_RB_ENABLE_PIN   = 3;
+const int MOTOR_RB_DIR_PIN1     = 32;
+const int MOTOR_RB_DIR_PIN2     = 33;
 
-int FRONT_ECHO_PIN        = 40;
-int FRONT_TRIGGER_PIN     = 41;
+// Left front motor
+const int MOTOR_LF_ENABLE_PIN   = 4;
+const int MOTOR_LF_DIR_PIN1     = 34;
+const int MOTOR_LF_DIR_PIN2     = 35;
 
-int RIGHT_ECHO_PIN        = 42;
-int RIGHT_TRIGGER_PIN     = 43;
+// Right front motor
+const int MOTOR_RF_ENABLE_PIN   = 5;
+const int MOTOR_RF_DIR_PIN1     = 30;
+const int MOTOR_RF_DIR_PIN2     = 31;
 
-#define TURN_SPEED          75
+const int LEFT_ECHO_PIN         = 38;
+const int LEFT_TRIGGER_PIN      = 39;
+
+const int FRONT_ECHO_PIN        = 40;
+const int FRONT_TRIGGER_PIN     = 41;
+
+const int RIGHT_ECHO_PIN        = 42;
+const int RIGHT_TRIGGER_PIN     = 43;
+
+#define TURN_SPEED          120
 #define MIN_SPEED           50
 #define MAX_SPEED           120
 #define MAX_DISTANCE        200
@@ -46,35 +49,53 @@ int RIGHT_TRIGGER_PIN     = 43;
 #define RIGHT_MIN_DISTANCE  10
 #define RIGHT_MAX_DISTANCE  20
 #define ACCELERATION_RATE   5
+#define LCD_RS_PIN          44
+#define LCD_EN_PIN          45
+#define LCD_D4_PIN          46
+#define LCD_D5_PIN          47
+#define LCD_D6_PIN          48
+#define LCD_D7_PIN          49
 
 NewPing l_sonar(LEFT_TRIGGER_PIN, LEFT_ECHO_PIN, MAX_DISTANCE);
 NewPing f_sonar(FRONT_TRIGGER_PIN, FRONT_ECHO_PIN, MAX_DISTANCE);
 NewPing r_sonar(RIGHT_TRIGGER_PIN, RIGHT_ECHO_PIN, MAX_DISTANCE);
 
-unsigned long bootupPrevMillis      = 0;
-unsigned long bootupInterval        = 7500;
+unsigned long bootupPrevMillis        = 0;
+unsigned long bootupInterval          = 2500L;
 
-unsigned long leftSonarPrevMillis   = 0;
-unsigned long frontSonarPrevMillis  = 0;
-unsigned long rightSonarPrevMillis  = 0;
+// Arduino power level, Lipo power level
+unsigned long batteryInfoPrevMillis   = 0;
+unsigned long batteryInfoInterval     = 60 * 1000L;
 
+// Mode, Velocity, minLeftDistance, minFrontDistance, minRightDistance,
+unsigned long carInfoPrevMillis       = 0;
+unsigned long carInfoInterval         = 350;
+
+unsigned long leftSonarPrevMillis     = 0;
+unsigned long frontSonarPrevMillis    = 0;
+unsigned long rightSonarPrevMillis    = 0;
+
+// Used for acceleration of the car (we should slowly increase velocity)
 unsigned long accelerationPrevMillis  = 0;
-const long accelerationInterval       = 1000;
+const long accelerationInterval       = 1000L;
 
-const long leftSonarInterval        = 70;
-const long frontSonarInterval       = 60;
-const long rightSonarInterval       = 70;
+const long leftSonarInterval          = 70;
+const long frontSonarInterval         = 60;
+const long rightSonarInterval         = 70;
 
-unsigned int leftDistance           = 0;
-unsigned int frontDistance          = 0;
-unsigned int rightDistance          = 0;
+unsigned int leftDistance             = 0;
+unsigned int frontDistance            = 0;
+unsigned int rightDistance            = 0;
 
-unsigned int prevVelocity         = MIN_SPEED;
-unsigned int velocity             = MIN_SPEED;
+unsigned int prevVelocity             = MIN_SPEED;
+unsigned int velocity                 = MIN_SPEED;
+
+bool isAutoMode                       = false;
 
 void setup(){
   Serial.begin(9600);
-
+  Serial1.begin(9600);
+  
   // Right motors
   pinMode(MOTOR_RF_ENABLE_PIN, OUTPUT);
   pinMode(MOTOR_RB_ENABLE_PIN, OUTPUT);
@@ -108,11 +129,38 @@ void setup(){
 
 void loop(){
   unsigned long currentMillis = millis();
-
-  unsigned int minDistance = 65535;
   
   if (currentMillis - bootupPrevMillis >= bootupInterval) {
-    if (currentMillis - frontSonarPrevMillis >= frontSonarInterval) {
+    if (isAutoMode){
+      autoMode();
+    } else {
+      manuelMode();
+    }
+  } else {
+    //lcd.print("Booting up...");
+  }
+}
+
+int getSerialData(){
+  int data = 0;
+  
+  if (Serial1.available()){
+    data = Serial1.read();
+
+    while(Serial1.available() && !data && data == 0) {
+        data = Serial1.read();
+    }
+  }
+
+   return data;
+}
+
+void autoMode(){
+  unsigned long currentMillis = millis();
+  
+  unsigned int minDistance = 65535;
+    
+  if (currentMillis - frontSonarPrevMillis >= frontSonarInterval) {
       frontSonarPrevMillis = currentMillis;
   
       frontDistance = f_sonar.ping_cm();
@@ -188,10 +236,48 @@ void loop(){
       forward(false);
     }
 
-    prevVelocity = velocity;
+    prevVelocity = velocity;  
+}
+
+void manuelMode(){
+  int data = getSerialData();
+  
+  // Car Bluetooth RC Android app is used here
+  if (data == 48){
+    velocity=0;
+  } else if (data == 48){
+    velocity=30;
+  } else if (data == 50){
+    velocity=40;
+  } else if (data == 51){
+    velocity=50;
+  } else if (data == 52){
+    velocity=60;
+  } else if (data == 53){
+    velocity=70;
+  } else if (data == 54){
+    velocity=80;
+  } else if (data == 55){
+    velocity=90;
+  } else if (data == 56){
+    velocity=100;
+  } else if (data == 57){
+    velocity=110;
+  } else if (data == 58){
+    velocity=120;
+  } else if (data == 70) {
+    forward(false);
+  } else if (data == 66) {
+    forward(true); 
+  } else if (data == 76) {
+    turn(true);
+  } else if (data == 82) {
+    turn(false);
+  } else if (data == 87) {
+    isAutoMode = true;    
+    velocity = MIN_SPEED;
   } else {
-    // bootup code here
-    Serial.println("Booting up...");
+    brake();
   }
 }
 
@@ -216,9 +302,10 @@ void findWay(unsigned int frontDistance, unsigned int leftDistance, unsigned int
   int lDistanceDiff = 0;
   int rDistanceDiff = 0;
   bool first = true;
-  while (fDistance < FRONT_MIN_DISTANCE + fDistanceDiff || 
+  int data = 0;
+  while ( (fDistance < FRONT_MIN_DISTANCE + fDistanceDiff || 
          lDistance < LEFT_MIN_DISTANCE + lDistanceDiff ||
-         rDistance < RIGHT_MIN_DISTANCE + rDistanceDiff ){
+         rDistance < RIGHT_MIN_DISTANCE + rDistanceDiff) && isAutoMode ){
     turn(lDistance > rDistance);
     
     delay(75);
@@ -257,6 +344,14 @@ void findWay(unsigned int frontDistance, unsigned int leftDistance, unsigned int
       first = false;
     }
 
+    data = getSerialData();
+
+    if (data == 119) {
+      isAutoMode = false;
+      
+      velocity = MIN_SPEED;
+    }  
+
     delay(75);
   }
 }
@@ -265,17 +360,17 @@ void forward(bool back){
   if (back) {
     velocity = MIN_SPEED;
   }
-  
-  Serial.print("V: ");
-  Serial.println(velocity);
       
   digitalWrite(MOTOR_RF_DIR_PIN1, back ? HIGH : LOW);
-  digitalWrite(MOTOR_LF_DIR_PIN1, back ? HIGH : LOW);
   digitalWrite(MOTOR_RF_DIR_PIN2, back ? LOW : HIGH);
+  
+  digitalWrite(MOTOR_LF_DIR_PIN1, back ? HIGH : LOW);
   digitalWrite(MOTOR_LF_DIR_PIN2, back ? LOW : HIGH);
+  
   digitalWrite(MOTOR_RB_DIR_PIN1, back ? HIGH : LOW);
-  digitalWrite(MOTOR_LB_DIR_PIN1, back ? HIGH : LOW);
   digitalWrite(MOTOR_RB_DIR_PIN2, back ? LOW : HIGH);
+  
+  digitalWrite(MOTOR_LB_DIR_PIN1, back ? HIGH : LOW);
   digitalWrite(MOTOR_LB_DIR_PIN2, back ? LOW : HIGH);
 
   analogWrite(MOTOR_RF_ENABLE_PIN, (int)(velocity));
@@ -296,6 +391,7 @@ void turn(bool left){
   digitalWrite(MOTOR_RF_DIR_PIN2, left ? HIGH : LOW);
   digitalWrite(MOTOR_RB_DIR_PIN1, left ? LOW : HIGH);
   digitalWrite(MOTOR_RB_DIR_PIN2, left ? HIGH : LOW);
+  
   digitalWrite(MOTOR_LF_DIR_PIN1, left ? HIGH : LOW);
   digitalWrite(MOTOR_LF_DIR_PIN2, left ? LOW : HIGH);
   digitalWrite(MOTOR_LB_DIR_PIN1, left ? HIGH : LOW);
