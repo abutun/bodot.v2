@@ -52,16 +52,18 @@ const int RIGHT_TRIGGER_PIN     = 43;
 
 const int SONAR_MAX_DISTANCE    = 200;
 
-int frontMinDistance          = 40;
-int frontMaxDistance          = 60;
+const float L_MOTORS_CORRECTION = 0.75;
 
-int lefMinDistance           = 30;
-int lefMaxDistance           = 45;
+int frontMinDistance            = 40;
+int frontMaxDistance            = 60;
 
-int rightMinDistance          = 30;
-int rightMaxDistance          = 45;
+int lefMinDistance              = 30;
+int lefMaxDistance              = 45;
 
-float accelerationRate         = 2;
+int rightMinDistance            = 30;
+int rightMaxDistance            = 45;
+
+float accelerationRate          = 2;
 
 NewPing l_sonar(LEFT_TRIGGER_PIN, LEFT_ECHO_PIN, SONAR_MAX_DISTANCE);
 NewPing f_sonar(FRONT_TRIGGER_PIN, FRONT_ECHO_PIN, SONAR_MAX_DISTANCE);
@@ -80,7 +82,7 @@ int prevRightSonarValue               = 0;
 
 // Used for acceleration of the car (we should slowly increase velocity)
 unsigned long accelerationPrevMillis  = 0;
-const long accelerationInterval       = 2000;
+const long accelerationInterval       = 1750;
 
 const long leftSonarInterval          = 80;
 const long frontSonarInterval         = 75;
@@ -90,8 +92,8 @@ unsigned int leftDistance             = 0;
 unsigned int frontDistance            = 0;
 unsigned int rightDistance            = 0;
 
-unsigned int prevVelocity             = 0;
 unsigned int velocity                 = 0;
+unsigned int prevVelocity             = 0;
 
 unsigned char prevDirection           = 'S';
 
@@ -100,6 +102,7 @@ int prevSerialDataValue               = 0;
 bool isAutoMode                       = false;
 bool booting                          = true;
 bool debug                            = false;
+bool waySearchFlag                    = false;
 
 unsigned int turnSpeed                = 0;
 unsigned int minSpeed                 = 0;
@@ -212,7 +215,7 @@ void loop(){
         lefMaxDistance = 35;
         rightMinDistance = 20;
         rightMaxDistance = 35;
-        accelerationRate = 3;
+        accelerationRate = 5;
     } else if (control2Value == LOW && control3Value == HIGH) {
         minSpeed = 50;
         turnSpeed = 65;
@@ -223,33 +226,33 @@ void loop(){
         lefMaxDistance = 37;
         rightMinDistance = 22;
         rightMaxDistance = 37;
-        accelerationRate = 2.7;          
+        accelerationRate = 4.5;          
     } else if (control2Value == HIGH && control3Value == LOW) {
         minSpeed = 70;
         turnSpeed = 75;
-        maxSpeed = 120;
+        maxSpeed = 150;
         frontMinDistance = 36;
         frontMaxDistance = 56;
         lefMinDistance = 24;
         lefMaxDistance = 39;
         rightMinDistance = 24;
         rightMaxDistance = 39;
-        accelerationRate = 2.4;             
+        accelerationRate = 4;             
     } else if (control2Value == HIGH && control3Value == HIGH) {
-        minSpeed = 80;
+        minSpeed = 90;
         turnSpeed = 75;
-        maxSpeed = 200;
+        maxSpeed = 250;
         frontMinDistance = 39;
         frontMaxDistance = 59;
         lefMinDistance = 26;
         lefMaxDistance = 41;
         rightMinDistance = 26;
         rightMaxDistance = 41;
-        accelerationRate = 2;                
+        accelerationRate = 3.5;                
     }
 
     prevVelocity = minSpeed;
-    
+
     velocity = minSpeed;
 
     manuelSpeedLevel = (maxSpeed - minSpeed) / 10;    
@@ -269,16 +272,24 @@ void autoMode(unsigned int minDistance){
     unsigned long currentMillis = millis();
 
     // Set velocity according to calculated distances (left, front, right)
-    velocity = map(minDistance, 0, SONAR_MAX_DISTANCE, minSpeed, maxSpeed);
+    if (waySearchFlag){
+      velocity = minSpeed;
 
-    // Do we need to accelerate?
-    if (currentMillis - accelerationPrevMillis >= accelerationInterval) {
-      if (prevVelocity < velocity){
-        accelerationPrevMillis = currentMillis;
+      prevVelocity = minSpeed;
+    } else {
+      // Do we need to accelerate?
+      if (currentMillis - accelerationPrevMillis >= accelerationInterval) {
+          accelerationPrevMillis = currentMillis;
+  
+          // Accelerate 
+          velocity = map(minDistance, 0, SONAR_MAX_DISTANCE, minSpeed, maxSpeed);
 
-        // Accelerate 
-        velocity = prevVelocity + ((prevVelocity * accelerationRate) / 100);
-      }
+          if (velocity > maxSpeed){
+             velocity = prevVelocity + ((prevVelocity * accelerationRate) / 100);
+          }
+
+          prevVelocity = velocity;
+      }      
     }
 
     // Check min, max speed thresholds
@@ -295,15 +306,13 @@ void autoMode(unsigned int minDistance){
 
     updateLedStatus(mappedFrontMinDistance, mappedLeftMinDistance, mappedRightMinDistance);
     
-    if (frontDistance < mappedFrontMinDistance || 
-        leftDistance < mappedLeftMinDistance || 
-        rightDistance < mappedRightMinDistance){
+    if (frontDistance < mappedFrontMinDistance || leftDistance < mappedLeftMinDistance || rightDistance < mappedRightMinDistance){
         findWay();
     } else {
         forward(false);
-    }
 
-    prevVelocity = velocity;  
+        waySearchFlag = false;
+    }
 }
 
 void manuelMode(){ 
@@ -476,10 +485,16 @@ void findWay(){
     brake();
 
     bool turnLeft = leftDistance > rightDistance;
-    int data = 0;
     unsigned int mappedFrontMinDistance = map(velocity, minSpeed, maxSpeed, frontMinDistance, frontMaxDistance);
     unsigned int mappedLeftMinDistance = map(velocity, minSpeed, maxSpeed, lefMinDistance, lefMaxDistance);
     unsigned int mappedRightMinDistance = map(velocity, minSpeed, maxSpeed, rightMinDistance, rightMaxDistance);
+
+    if (frontDistance < mappedFrontMinDistance){
+      delay(1000);
+    } else {
+      delay(100);
+    }
+    
     while ( (frontDistance < mappedFrontMinDistance || 
            leftDistance < mappedLeftMinDistance ||
            rightDistance < mappedRightMinDistance) && isAutoMode ){
@@ -489,6 +504,8 @@ void findWay(){
     
           updateLedStatus(mappedFrontMinDistance, mappedLeftMinDistance, mappedRightMinDistance);
     }
+
+    waySearchFlag = true;
 }
 
 void updateLedStatus(unsigned int frontMinDistance, unsigned int leftMinDistance, unsigned int rightMinDistance){
@@ -532,10 +549,10 @@ void forward(bool back){
     }
   
     // Set speed
-    analogWrite(MOTOR_RF_ENABLE_PIN, (int)(velocity * 1.1));
+    analogWrite(MOTOR_RF_ENABLE_PIN, (int)(velocity));
     analogWrite(MOTOR_RB_ENABLE_PIN, (int)(velocity));
-    analogWrite(MOTOR_LF_ENABLE_PIN, (int)(velocity));
-    analogWrite(MOTOR_LB_ENABLE_PIN, (int)(velocity));
+    analogWrite(MOTOR_LF_ENABLE_PIN, (int)(velocity * L_MOTORS_CORRECTION));
+    analogWrite(MOTOR_LB_ENABLE_PIN, (int)(velocity * L_MOTORS_CORRECTION));
   
     prevDirection = back ? 'B' : 'F';
 }
@@ -589,9 +606,6 @@ void printInfo(){
       
       Serial.print("V: ");
       Serial.print(velocity);
-      Serial.print("\t"); 
-      Serial.print("PV: ");
-      Serial.print(prevVelocity);
       Serial.print("\t"); 
       Serial.print("Auto: ");
       Serial.print(isAutoMode);
